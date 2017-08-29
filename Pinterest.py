@@ -4,18 +4,19 @@ from selenium.common.exceptions import TimeoutException
 import time
 import re
 import urllib
+import requests
 
-browser = webdriver.Firefox()
+browser = webdriver.Chrome()
 #µ«¬Ω
 def login(login, pw):
       url = 'https://www.pinterest.com/login/'
       #…Ë÷√ ±œﬁ
-      browser.set_page_load_timeout(30)
+      browser.set_page_load_timeout(60)
       #º”‘ÿÕ¯“≥
       try:
             browser.get(url)
       except TimeoutException:
-            print 'time out after 30s when loading page'
+            print 'time out after 60s when loading page'
             #Õ£÷πº”‘ÿÕ¯“≥
             browser.execute_script('window.stop()')
       time.sleep(10)
@@ -40,45 +41,57 @@ def login(login, pw):
       except:
             print 'click continue error!'
 
-#πˆ∂Ø“≥√Ê
-def scroll():
-      for x in range(11):
-            #print "NO." + str(x) + " sroll" 
-            js = "var q=document.documentElement.scrollTop=5000*20"
-            browser.execute_script(js)
-            time.sleep(5)
 
 #≈¿Õº∆¨
 def getImage():
+      global num
       content=browser.page_source
       reg = r'https://s-media-cache-ak0.pinimg.com/originals/.+?\.jpg 4x'
       imglist = re.findall(reg,content)
-      num = 1
+      
       for img in imglist:
             img = img.replace(" 4x",'')
             try:
-                  urllib.urlretrieve(img, "D:\\pinterest\\jpg\\" + str(num) +".jpg",timeout=10)
-                  print str(num) + '.jpg is successfully downloaded.'
-                  num +=1
-            except  socket.timeout as e:
-                  print 'timeout'
-            
-            
-      if num == 1:
-            print 'error in crawl!'
+                 pic = requests.get(img,timeout=10)
+            except  requests.exceptions.ConnectionError:
+                  print 'µ±«∞Õº∆¨œ¬‘ÿ ß∞‹'
+                  continue
+            except  requests.exceptions.ConnectTimeout:
+                  print 'µ±«∞Õº∆¨œ¬‘ÿ ß∞‹'
+                  continue
+            except  requests.exceptions.Timeout:
+                  print 'µ±«∞Õº∆¨œ¬‘ÿ ß∞‹'
+                  continue
+            print str(num)+'.jpg is downloaded.'
+            string = "D:\\pinterest\\jpg\\" + str(num) + ".jpg"
+            fp = open(string,'wb')
+            fp.write(pic.content)
+            fp.close()
+            num+=1
+      return True
 
 
-
+num = 1
 if __name__ == '__main__':
-      email = raw_input('please input your email:')
-      pw = raw_input('please input your password:')
+      #email = raw_input('please input your email:')
+      #pw = raw_input('please input your password:')
+      email = 'izhongyuchen@126.com'
+      pw = 'zyc759631647'
       login(login=email,pw=pw)
-      print 'sleep 30s'
+      print 'sleep for 30s'
       time.sleep(30)
-      print 'start scroll!'
-      scroll()
       print 'start crawl!'
-      getImage()
+      while getImage():
+            try:
+                  browser.refresh()
+                  print 'refresh successfully'
+            except Exception as e:
+                  print 'Exception found',e
+                  break
+            time.sleep(30)
+            print 'next'
+            
+      
       print 'Program terminated normally'
 
                                                 
