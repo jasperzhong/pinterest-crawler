@@ -73,10 +73,9 @@ def getImage():
 
 num = 1
 if __name__ == '__main__':
-      #email = raw_input('please input your email:')
-      #pw = raw_input('please input your password:')
-      email = 'izhongyuchen@126.com'
-      pw = 'zyc759631647'
+      email = raw_input('please input your email:')
+      pw = raw_input('please input your password:')
+
       login(login=email,pw=pw)
       print 'sleep for 30s'
       time.sleep(30)
