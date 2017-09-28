@@ -17,24 +17,28 @@ sys.stdin = stdin
 sys.stderr = stderr
 sys.setdefaultencoding('utf8')
 
-browser = webdriver.Chrome()
-cond = threading.Condition()
-queue = Queue()  # image url
+metex = threading.Lock()
 num = 1
 
 
 # login
-def login(login, pw):
+def login(login, pw, browser, timeout):
     url = 'https://www.pinterest.com/login/'
     # set timeout
-    browser.set_page_load_timeout(60)
+    browser.set_page_load_timeout(timeout)
     # load page
     try:
         browser.get(url)
     except TimeoutException:
-        print u'time out after 60s when loading page'
-        # stop loading page
-        browser.execute_script('window.stop()')
+        print u'time out after 30s when loading page'
+        # stop load
+        while True:
+            try:
+                browser.execute_script('window.stop()')
+                break
+            except:
+                pass
+
     # input email
     try:
         browser.find_element_by_name('id').send_keys(login)
@@ -58,24 +62,30 @@ def login(login, pw):
 
 
 class Producer(threading.Thread):
+    def __init__(self, queue, browser, cond, id):
+        super(Producer, self).__init__()
+        self.queue = queue
+        self.browser = browser
+        self.cond = cond
+        self.id = id
+
     def run(self):
-        global queue
         # 每轮都刷新一次，更新页面，然后开始爬取所有图片url，最后刷新
         while True:
-            content = browser.page_source
+            content = self.browser.page_source
             reg = r'https://s-media-cache-ak0.pinimg.com/originals/.+?\.jpg 4x'
             imglist = re.findall(reg, content)
             # 输向queue输入新的数据时需要上锁
-            if cond.acquire():
+            if self.cond.acquire():
                 for img in imglist:
                     img = img.replace(" 4x", '')
-                    queue.put(img)
-                print 'push new ' + str(len(imglist)) + ' to queue.'
-                cond.notify()  # 唤醒Comsumer
-                cond.release()
+                    self.queue.put(img)
+                print 'push ' + str(len(imglist)) + ' new urls to the queue' + str(self.id)
+                self.cond.notify()  # 唤醒Comsumer
+                self.cond.release()
             print 'refresh'
             try:
-                browser.refresh()
+                self.browser.refresh()
             except Exception as e:
                 print u'Exception found', e
                 continue
@@ -83,56 +93,86 @@ class Producer(threading.Thread):
 
 
 class Comsumer(threading.Thread):
+    def __init__(self, queue, cond, id):
+        super(Comsumer, self).__init__()
+        self.queue = queue
+        self.cond = cond
+        self.id = id
+
     def run(self):
         global num
-        global queue
         while True:
-
             # 如果上锁了，说明生产者正在使用queue，此时不能进入
-            if cond.acquire():
-                if queue.empty():
-                    cond.wait()  # 让Comsumer等待
-                img = queue.get()
-                try:
-                    pic = requests.get(img, timeout=10)
-                except  requests.exceptions.ConnectionError:
-                    print u'downloading current image failed'
-                    continue
-                except  requests.exceptions.ConnectTimeout:
-                    print u'downloading current image failed'
-                    continue
-                except  requests.exceptions.Timeout:
-                    print u'downloading current image failed'
-                    continue
-                print str(num) + '.jpg is downloaded.'
-                string = "D:\\pinterest\\jpg name\\" + str(num) + ".jpg"
-                fp = open(string, 'wb')
-                fp.write(pic.content)
-                fp.close()
-                num += 1
-                print 'queue.qsize=' + str(queue.qsize())
-                cond.release()
+            if self.cond.acquire():
+                if self.queue.empty():
+                    self.cond.wait()  # 让Comsumer等待
+                else:
+                    while self.queue.empty() == False:
+                        img = self.queue.get()
+                        try:
+                            pic = requests.get(img, timeout=10)
+                        except  requests.exceptions.ConnectionError:
+                            print u'downloading current image failed'
+                            continue
+                        except  requests.exceptions.ConnectTimeout:
+                            print u'downloading current image failed'
+                            continue
+                        except  requests.exceptions.Timeout:
+                            print u'downloading current image failed'
+                            continue
+                        print str(num) + '.jpg is downloaded.'
+                        string = "D:\\pinterest\\jpg name\\" + str(num) + ".jpg"
+                        fp = open(string, 'wb')
+                        fp.write(pic.content)
+                        fp.close()
+                        metex.acquire()
+                        num += 1
+                        metex.release()
+                        print 'queue' + str(self.id) + '.qsize=' + str(self.queue.qsize())
+                    self.cond.release()
 
 
 if __name__ == '__main__':
-    email = raw_input('please input your email:')
-    pw = raw_input('please input your password:')
+    # email = raw_input('please input your email:')
+    # pw = raw_input('please input your password:')
+    email = 'izhongyuchen@163.com'
+    pw = 'zyc759631647'
     file = open(r"D:\pinterest\jpg name\num.txt")
     num = file.read()
     num = int(num)
     file.close()
-    login(login=email, pw=pw)
-    print 'sleep 15s'
-    time.sleep(15)
-    print 'start to crawl'
-    producer = Producer()
-    comsumer = Comsumer()
-    producer.start()
-    comsumer.start()
-    
+    # True Thread numbers is THREAD_NUM*2
+    THREAD_NUM = 2
+    browser = range(0, THREAD_NUM)
+    queue = range(0, THREAD_NUM)
+    cond = range(0, THREAD_NUM)
+    for i in range(0, THREAD_NUM):
+        browser[i] = webdriver.Chrome()
+        queue[i] = Queue()
+        cond[i] = threading.Condition()
+
+    producer = range(0, THREAD_NUM)
+    comsumer = range(0, THREAD_NUM)
+    for i in range(0, THREAD_NUM):
+        login(login=email, pw=pw, browser=browser[i], timeout=60 + i * 15)
+        time.sleep(15)
+        try:
+            browser[i].refresh()
+        except:
+            pass
+        print 'sleep 15s'
+        time.sleep(15)
+        producer[i] = Producer(queue=queue[i], browser=browser[i], cond=cond[i], id=i)
+        comsumer[i] = Comsumer(queue=queue[i], cond=cond[i], id=i)
+        print str(i) + ' start to crawl'
+        producer[i].start()
+        comsumer[i].start()
+
     if num == 3000:
-        producer.join()
-        comsumer.join()
+        for i in range(0, THREAD_NUM):
+            producer[i].join()
+            comsumer[i].join()
+
         file = open(r"D:\pinterest\jpg\num.txt", 'w')
         file.write(str(num))
         file.close()
