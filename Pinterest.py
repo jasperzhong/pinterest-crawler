@@ -2,11 +2,13 @@
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
 from Queue import Queue
+from pymongo import MongoClient
 import time
 import re
 import requests
 import sys
 import threading
+import pymongo
 
 stdout = sys.stdout
 stdin = sys.stdin
@@ -17,7 +19,11 @@ sys.stdin = stdin
 sys.stderr = stderr
 sys.setdefaultencoding('utf8')
 
+client = MongoClient()
+db = client.pinterest
+
 metex = threading.Lock()
+metex2 = threading.Lock()
 num = 1
 
 
@@ -73,23 +79,64 @@ class Producer(threading.Thread):
         # 每轮都刷新一次，更新页面，然后开始爬取所有图片url，最后刷新
         while True:
             content = self.browser.page_source
-            reg = r'https://s-media-cache-ak0.pinimg.com/originals/.+?\.jpg 4x'
-            imglist = re.findall(reg, content)
+            file = open(r"D:\test.txt", 'w')
+            file.write(content)
+            file.close()
+            regFindName1 = r'<div class="_su _st _sv _sm _5k _sn _sr _nl _nm _nn _no">[^<]*?</div>'
+            regFindName2 = r'<div class="_su _st _sv _sm _5k _sn _sr _nl _nm _nn _no" data-reactid="\d*">[^<]*?</div>'
+            regFindDisp = r'<img alt=".+?class'  # 第一个找到的需要删除
+            regFindUrl = r'https://s-media-cache-ak0.pinimg.com/originals/.+? 4x'
+
+            imglist = re.findall(regFindUrl, content)
+            imglistLen = len(imglist)
             # 输向queue输入新的数据时需要上锁
             if self.cond.acquire():
-                for img in imglist:
-                    img = img.replace(" 4x", '')
-                    self.queue.put(img)
-                print 'push ' + str(len(imglist)) + ' new urls to the queue' + str(self.id)
+                for i in range(imglistLen):
+                    imglist[i] = imglist[i].replace(" 4x", '')
+                    self.queue.put(imglist[i])
+
+                print 'push ' + imglistLen + ' new urls to the queue' + str(self.id)
                 self.cond.notify()  # 唤醒Comsumer
                 self.cond.release()
+
+            displist = re.findall(regFindDisp, content)
+
+            namelist1 = re.findall(regFindName1, content)
+            namelist2 = re.findall(regFindName2, content)
+            namelist = namelist1 + namelist2
+            namelistLen = len(namelist)
             print 'refresh'
             try:
                 self.browser.refresh()
             except Exception as e:
                 print u'Exception found', e
                 continue
-            time.sleep(15)
+
+            del displist[0]  # 第一个往往是用户名
+            displistLen = len(displist)
+            for i in range(displistLen):
+                displist[i] = displist[i].replace("<img alt=\"", '')
+                displist[i] = displist[i].replace("\" class", '')
+
+            for i in range(namelistLen):
+                namelist[i] = namelist[i].replace(
+                    "<div class=\"_su _st _sv _sm _5k _sn _sr _nl _nm _nn _no\" data-reactid=\"", '')
+                namelist[i] = namelist[i].replace("</div>", '')
+                namelist[i] = namelist[i].replace("\">", '')
+
+            postlist = []
+            print str(namelistLen) + ' ' + str(displistLen) + ' ' + str(imglistLen)
+
+            if namelistLen == displistLen:
+                if displistLen == imglistLen:
+                    for i in range(imglistLen):
+                        post = {"name": namelist[i], "discription": displist[i], "url": imglist[i]}
+                        postlist.append(post)
+
+            metex2.acquire()
+            db.test.insert_many(postlist)
+            metex2.release()
+            print 'Store images\'s infomation into MongoDB successfully.'
 
 
 class Comsumer(threading.Thread):
@@ -133,10 +180,10 @@ class Comsumer(threading.Thread):
 
 
 if __name__ == '__main__':
-    # email = raw_input('please input your email:')
-    # pw = raw_input('please input your password:')
-    email = 'izhongyuchen@163.com'
-    pw = 'zyc759631647'
+
+    email = raw_input('please input your email:')
+    pw = raw_input('please input your password:')
+
     file = open(r"D:\pinterest\jpg name\num.txt")
     num = file.read()
     num = int(num)
